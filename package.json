@@ -1,0 +1,17 @@
+{
+  "name": "yaml-line-lint",
+  "version": "0.1.0",
+  "description": "A dependency-free linter for YAML config files that reports findings with line numbers.",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "bin": {
+    "yaml-line-lint": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
