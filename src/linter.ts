@@ -26,7 +26,7 @@ interface MapFrame {
   keys: Set<string>;
 }
 
-const KEY_PATTERN = /^([A-Za-z0-9_.\-]+):(\s|$)/;
+const BARE_KEY_PATTERN = /^[A-Za-z0-9_.\-]+/;
 const LIST_MARKER_PATTERN = /^(-\s+)+/;
 
 export function lint(content: string, options: LintOptions = defaultOptions): Finding[] {
@@ -68,6 +68,10 @@ export function lint(content: string, options: LintOptions = defaultOptions): Fi
     }
 
     checkDuplicateKey(rawLine, leading.length, lineNumber, stack, findings);
+
+    if (rawLine.includes("{")) {
+      checkFlowMappings(rawLine, lineNumber, findings);
+    }
   });
 
   return findings;
@@ -99,11 +103,15 @@ function checkDuplicateKey(
   const effectiveIndent = baseIndent + (listMarker?.[0].length ?? 0);
   const remainder = isNewListItem ? content.slice(listMarker![0].length) : content;
 
-  const keyMatch = remainder.match(KEY_PATTERN);
-  if (!keyMatch) {
+  const keyResult = readKey(remainder);
+  if (!keyResult) {
     return;
   }
-  const key = keyMatch[1];
+  const afterKey = remainder.slice(keyResult.length);
+  if (!/^:(\s|$)/.test(afterKey)) {
+    return;
+  }
+  const key = keyResult.key;
   const keyColumn = effectiveIndent + 1;
 
   if (isNewListItem) {
@@ -137,4 +145,232 @@ function checkDuplicateKey(
   } else {
     top.keys.add(key);
   }
+}
+
+// Reads a single YAML scalar key from the start of `text`: a bare identifier,
+// or a single- or double-quoted string with its quoting rules (`''` escapes a
+// quote in single-quoted strings, `\"` and friends in double-quoted ones).
+// Returns the decoded key and how many characters of `text` it consumed
+// (quotes included), or null if `text` does not start with a valid key.
+function readKey(text: string): { key: string; length: number } | null {
+  if (text[0] === "'") {
+    let i = 1;
+    let value = "";
+    while (i < text.length) {
+      if (text[i] === "'") {
+        if (text[i + 1] === "'") {
+          value += "'";
+          i += 2;
+          continue;
+        }
+        return { key: value, length: i + 1 };
+      }
+      value += text[i];
+      i += 1;
+    }
+    return null;
+  }
+
+  if (text[0] === '"') {
+    let i = 1;
+    let value = "";
+    while (i < text.length) {
+      if (text[i] === "\\" && i + 1 < text.length) {
+        const next = text[i + 1];
+        switch (next) {
+          case "n":
+            value += "\n";
+            break;
+          case "t":
+            value += "\t";
+            break;
+          default:
+            value += next;
+        }
+        i += 2;
+        continue;
+      }
+      if (text[i] === '"') {
+        return { key: value, length: i + 1 };
+      }
+      value += text[i];
+      i += 1;
+    }
+    return null;
+  }
+
+  const match = text.match(BARE_KEY_PATTERN);
+  if (!match) {
+    return null;
+  }
+  return { key: match[0], length: match[0].length };
+}
+
+// Skips over a quoted scalar starting at `text[start]` (which must be a
+// quote character) and returns the index just past its closing quote, or -1
+// if the quote is never closed on this line.
+function skipQuoted(text: string, start: number): number {
+  const quote = text[start];
+  let i = start + 1;
+  while (i < text.length) {
+    if (quote === "'") {
+      if (text[i] === "'") {
+        if (text[i + 1] === "'") {
+          i += 2;
+          continue;
+        }
+        return i + 1;
+      }
+    } else if (text[i] === "\\") {
+      i += 2;
+      continue;
+    } else if (text[i] === '"') {
+      return i + 1;
+    }
+    i += 1;
+  }
+  return -1;
+}
+
+// Flow mappings (`{a: 1, b: 2}`) are their own self-contained scope: a
+// duplicate key inside one is a mistake regardless of the surrounding
+// block-style indentation, so this check runs independently of the
+// indentation stack used for block mappings. Only mappings that open and
+// close on the same line are checked; one that spans multiple lines is left
+// alone rather than risk a false positive.
+function checkFlowMappings(rawLine: string, lineNumber: number, findings: Finding[]): void {
+  const commentIndex = findCommentStart(rawLine);
+  const scanned = commentIndex === -1 ? rawLine : rawLine.slice(0, commentIndex);
+
+  let searchFrom = 0;
+  while (true) {
+    const openIndex = scanned.indexOf("{", searchFrom);
+    if (openIndex === -1) {
+      return;
+    }
+    const closeIndex = findMatchingBrace(scanned, openIndex);
+    if (closeIndex === -1) {
+      return;
+    }
+    checkFlowMappingKeys(scanned, openIndex, closeIndex, lineNumber, findings);
+    searchFrom = closeIndex + 1;
+  }
+}
+
+function findCommentStart(text: string): number {
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "'" || ch === '"') {
+      const end = skipQuoted(text, i);
+      if (end === -1) {
+        return -1;
+      }
+      i = end;
+      continue;
+    }
+    if (ch === "#" && (i === 0 || /\s/.test(text[i - 1]))) {
+      return i;
+    }
+    i += 1;
+  }
+  return -1;
+}
+
+function findMatchingBrace(text: string, openIndex: number): number {
+  let depth = 0;
+  let i = openIndex;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "'" || ch === '"') {
+      const end = skipQuoted(text, i);
+      if (end === -1) {
+        return -1;
+      }
+      i = end;
+      continue;
+    }
+    if (ch === "{") {
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return i;
+      }
+    }
+    i += 1;
+  }
+  return -1;
+}
+
+function checkFlowMappingKeys(
+  text: string,
+  openIndex: number,
+  closeIndex: number,
+  lineNumber: number,
+  findings: Finding[],
+): void {
+  const inner = text.slice(openIndex + 1, closeIndex);
+  const seen = new Set<string>();
+  let itemStart = openIndex + 1;
+
+  for (const item of splitFlowItems(inner)) {
+    const offset = item.match(/^\s*/)?.[0].length ?? 0;
+    const trimmed = item.trim();
+    const column = itemStart + offset + 1;
+    itemStart += item.length + 1; // +1 for the comma separating items
+
+    if (trimmed.length === 0) {
+      continue;
+    }
+    const keyResult = readKey(trimmed);
+    if (!keyResult) {
+      continue;
+    }
+    if (!/^\s*:(\s|$)/.test(trimmed.slice(keyResult.length))) {
+      continue;
+    }
+
+    const key = keyResult.key;
+    if (seen.has(key)) {
+      findings.push({
+        line: lineNumber,
+        column,
+        rule: "duplicate-key",
+        severity: "error",
+        message: `duplicate key "${key}" in the same flow mapping`,
+      });
+    } else {
+      seen.add(key);
+    }
+  }
+}
+
+// Splits the inside of a flow mapping on top-level commas, leaving commas
+// nested inside quoted strings, `{}`, or `[]` untouched.
+function splitFlowItems(text: string): string[] {
+  const items: string[] = [];
+  let depth = 0;
+  let start = 0;
+  let i = 0;
+
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "'" || ch === '"') {
+      const end = skipQuoted(text, i);
+      i = end === -1 ? text.length : end;
+      continue;
+    }
+    if (ch === "{" || ch === "[") {
+      depth += 1;
+    } else if (ch === "}" || ch === "]") {
+      depth -= 1;
+    } else if (ch === "," && depth === 0) {
+      items.push(text.slice(start, i));
+      start = i + 1;
+    }
+    i += 1;
+  }
+  items.push(text.slice(start));
+  return items;
 }

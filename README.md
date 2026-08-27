@@ -77,10 +77,13 @@ finding, and 0 otherwise, so it can gate a CI job.
 
 ## Known limitations
 
-The duplicate-key check only recognizes plain `key: value` lines (bare
-identifiers made of letters, digits, `_`, `-`, `.`). Quoted keys, flow-style
-mappings (`{a: 1, b: 2}`), and keys containing spaces or colons are not
-tracked yet.
+The duplicate-key check recognizes bare keys (`key: value`), single- and
+double-quoted keys (`'key': value`, `"key": value`), and flow-style mappings
+(`{a: 1, b: 2}`) as long as the mapping opens and closes on the same line. A
+flow mapping split across multiple lines is not tracked, and duplicate
+detection treats a bare key and a quoted key with the same text as the same
+key (as YAML does), but does not resolve anything beyond the `\n`/`\t`
+escapes in a double-quoted key.
 
 ## Development
 
