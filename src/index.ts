@@ -1,20 +1,23 @@
 #!/usr/bin/env node
-import { readFileSync } from "fs";
-import { defaultOptions, Finding, lint, LintOptions } from "./linter";
+import { readFileSync, writeFileSync } from "fs";
+import { defaultOptions, fixTrailingWhitespace, Finding, lint, LintOptions } from "./linter";
 
 interface FileResult {
   file: string;
   findings: Finding[];
 }
 
-function parseArgs(argv: string[]): { files: string[]; json: boolean; options: LintOptions } {
+function parseArgs(argv: string[]): { files: string[]; json: boolean; fix: boolean; options: LintOptions } {
   const files: string[] = [];
   let json = false;
+  let fix = false;
   const options: LintOptions = { ...defaultOptions };
 
   for (const arg of argv) {
     if (arg === "--json") {
       json = true;
+    } else if (arg === "--fix") {
+      fix = true;
     } else if (arg.startsWith("--max-line-length=")) {
       const value = Number(arg.slice("--max-line-length=".length));
       if (!Number.isNaN(value) && value > 0) {
@@ -27,7 +30,7 @@ function parseArgs(argv: string[]): { files: string[]; json: boolean; options: L
     }
   }
 
-  return { files, json, options };
+  return { files, json, fix, options };
 }
 
 function printHuman(results: FileResult[]): void {
@@ -64,15 +67,16 @@ function main(): number {
     return 2;
   }
 
-  const { files, json, options } = parsed;
+  const { files, json, fix, options } = parsed;
 
   if (files.length === 0) {
-    console.error("usage: yaml-line-lint [--json] [--max-line-length=N] <file.yaml> [more files...]");
+    console.error("usage: yaml-line-lint [--json] [--fix] [--max-line-length=N] <file.yaml> [more files...]");
     return 2;
   }
 
   const results: FileResult[] = [];
   let hasError = false;
+  let fixedCount = 0;
 
   for (const file of files) {
     let content: string;
@@ -82,11 +86,25 @@ function main(): number {
       console.error(`could not read ${file}: ${(err as Error).message}`);
       return 2;
     }
+
+    if (fix) {
+      const fixed = fixTrailingWhitespace(content);
+      if (fixed !== content) {
+        writeFileSync(file, fixed, "utf8");
+        content = fixed;
+        fixedCount += 1;
+      }
+    }
+
     const findings = lint(content, options);
     if (findings.some((f) => f.severity === "error")) {
       hasError = true;
     }
     results.push({ file, findings });
+  }
+
+  if (fix && !json && fixedCount > 0) {
+    console.log(`fixed trailing whitespace in ${fixedCount} file${fixedCount === 1 ? "" : "s"}`);
   }
 
   if (json) {

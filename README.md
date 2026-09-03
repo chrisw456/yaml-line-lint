@@ -64,6 +64,7 @@ finding, and 0 otherwise, so it can gate a CI job.
 ## Options
 
 - `--json` — emit findings as JSON instead of plain text.
+- `--fix` — rewrite files in place, stripping trailing whitespace, before linting. Line endings are left as they were; other rules (tabs, duplicate keys, long lines) are reported but not auto-fixed.
 - `--max-line-length=N` — override the default 120-character line limit.
 
 ## Rules

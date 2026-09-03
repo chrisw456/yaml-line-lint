@@ -77,6 +77,16 @@ export function lint(content: string, options: LintOptions = defaultOptions): Fi
   return findings;
 }
 
+// Strips trailing spaces/tabs from every line while leaving each line's
+// original terminator (\n, \r\n, \r, or none on the last line) untouched.
+export function fixTrailingWhitespace(content: string): string {
+  const parts = content.split(/(\r\n|\r|\n)/);
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = parts[i].replace(/[ \t]+$/, "");
+  }
+  return parts.join("");
+}
+
 function checkTrailingWhitespace(rawLine: string, lineNumber: number, findings: Finding[]): void {
   const match = rawLine.match(/[ \t]+$/);
   if (match) {
