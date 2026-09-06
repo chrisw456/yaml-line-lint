@@ -76,6 +76,23 @@ finding, and 0 otherwise, so it can gate a CI job.
 | `trailing-whitespace` | warning  | spaces or tabs at the end of a line                |
 | `line-length`         | warning  | a line longer than the configured limit            |
 
+## Ignoring a line
+
+A trailing comment can suppress findings for the line it's on:
+
+```yaml
+key: value      # lint:ignore
+another: value  # lint:ignore=trailing-whitespace,line-length
+```
+
+`# lint:ignore` on its own suppresses every rule for that line. `# lint:ignore=rule-a,rule-b`
+suppresses only the listed rules, so other problems on the same line are still reported. The
+directive has to be the start of the comment (only leading whitespace after the `#` is allowed
+before it), but text can follow it, e.g. `# lint:ignore=no-tabs legacy file, tabs allowed here`.
+
+A duplicate key on an ignored line is still recorded internally, so a later duplicate of the same
+key that isn't ignored is still caught.
+
 ## Known limitations
 
 The duplicate-key check recognizes bare keys (`key: value`), single- and

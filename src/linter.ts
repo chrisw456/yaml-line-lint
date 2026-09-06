@@ -37,16 +37,19 @@ export function lint(content: string, options: LintOptions = defaultOptions): Fi
   lines.forEach((rawLine, index) => {
     const lineNumber = index + 1;
     const trimmed = rawLine.trim();
+    const ignore = parseIgnoreDirective(rawLine);
+    const lineFindings: Finding[] = [];
 
     if (trimmed.length === 0 || trimmed.startsWith("#")) {
-      checkTrailingWhitespace(rawLine, lineNumber, findings);
+      checkTrailingWhitespace(rawLine, lineNumber, lineFindings);
+      pushAllowed(lineFindings, ignore, findings);
       return;
     }
 
     const leading = rawLine.match(/^[ \t]*/)?.[0] ?? "";
     const tabIndex = leading.indexOf("\t");
     if (tabIndex !== -1) {
-      findings.push({
+      lineFindings.push({
         line: lineNumber,
         column: tabIndex + 1,
         rule: "no-tabs",
@@ -55,10 +58,10 @@ export function lint(content: string, options: LintOptions = defaultOptions): Fi
       });
     }
 
-    checkTrailingWhitespace(rawLine, lineNumber, findings);
+    checkTrailingWhitespace(rawLine, lineNumber, lineFindings);
 
     if (rawLine.length > options.maxLineLength) {
-      findings.push({
+      lineFindings.push({
         line: lineNumber,
         column: options.maxLineLength + 1,
         rule: "line-length",
@@ -67,14 +70,50 @@ export function lint(content: string, options: LintOptions = defaultOptions): Fi
       });
     }
 
-    checkDuplicateKey(rawLine, leading.length, lineNumber, stack, findings);
+    // Always update the duplicate-key stack, even if this line's findings end
+    // up suppressed below, so an ignored duplicate still registers its key
+    // and a later, unignored duplicate of the same key is still caught.
+    checkDuplicateKey(rawLine, leading.length, lineNumber, stack, lineFindings);
 
     if (rawLine.includes("{")) {
-      checkFlowMappings(rawLine, lineNumber, findings);
+      checkFlowMappings(rawLine, lineNumber, lineFindings);
     }
+
+    pushAllowed(lineFindings, ignore, findings);
   });
 
   return findings;
+}
+
+// Recognizes a trailing `# lint:ignore` or `# lint:ignore=rule-a,rule-b`
+// comment. Returns "all" to suppress every finding on the line, a Set of
+// rule names to suppress only those, or null if the line has no directive.
+function parseIgnoreDirective(rawLine: string): "all" | Set<string> | null {
+  const commentIndex = findCommentStart(rawLine);
+  if (commentIndex === -1) {
+    return null;
+  }
+  const comment = rawLine.slice(commentIndex);
+  const match = comment.match(/^#\s*lint:ignore(?:=([\w-]+(?:,[\w-]+)*))?(?:\s|$)/);
+  if (!match) {
+    return null;
+  }
+  if (!match[1]) {
+    return "all";
+  }
+  return new Set(match[1].split(","));
+}
+
+function pushAllowed(lineFindings: Finding[], ignore: "all" | Set<string> | null, findings: Finding[]): void {
+  if (ignore === "all") {
+    return;
+  }
+  for (const finding of lineFindings) {
+    if (ignore instanceof Set && ignore.has(finding.rule)) {
+      continue;
+    }
+    findings.push(finding);
+  }
 }
 
 // Strips trailing spaces/tabs from every line while leaving each line's
