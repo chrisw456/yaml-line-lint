@@ -1,27 +1,39 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from "fs";
-import { defaultOptions, fixTrailingWhitespace, Finding, lint, LintOptions } from "./linter";
+import { loadConfig } from "./config";
+import { fixTrailingWhitespace, Finding, lint } from "./linter";
 
 interface FileResult {
   file: string;
   findings: Finding[];
 }
 
-function parseArgs(argv: string[]): { files: string[]; json: boolean; fix: boolean; options: LintOptions } {
+interface ParsedArgs {
+  files: string[];
+  json: boolean;
+  fix: boolean;
+  configPath: string | undefined;
+  maxLineLengthOverride: number | undefined;
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
   const files: string[] = [];
   let json = false;
   let fix = false;
-  const options: LintOptions = { ...defaultOptions };
+  let configPath: string | undefined;
+  let maxLineLengthOverride: number | undefined;
 
   for (const arg of argv) {
     if (arg === "--json") {
       json = true;
     } else if (arg === "--fix") {
       fix = true;
+    } else if (arg.startsWith("--config=")) {
+      configPath = arg.slice("--config=".length);
     } else if (arg.startsWith("--max-line-length=")) {
       const value = Number(arg.slice("--max-line-length=".length));
       if (!Number.isNaN(value) && value > 0) {
-        options.maxLineLength = value;
+        maxLineLengthOverride = value;
       }
     } else if (arg.startsWith("-")) {
       throw new Error(`unrecognized flag: ${arg}`);
@@ -30,7 +42,7 @@ function parseArgs(argv: string[]): { files: string[]; json: boolean; fix: boole
     }
   }
 
-  return { files, json, fix, options };
+  return { files, json, fix, configPath, maxLineLengthOverride };
 }
 
 function printHuman(results: FileResult[]): void {
@@ -59,7 +71,7 @@ function printJson(results: FileResult[]): void {
 }
 
 function main(): number {
-  let parsed: ReturnType<typeof parseArgs>;
+  let parsed: ParsedArgs;
   try {
     parsed = parseArgs(process.argv.slice(2));
   } catch (err) {
@@ -67,11 +79,24 @@ function main(): number {
     return 2;
   }
 
-  const { files, json, fix, options } = parsed;
+  const { files, json, fix, configPath, maxLineLengthOverride } = parsed;
 
   if (files.length === 0) {
-    console.error("usage: yaml-line-lint [--json] [--fix] [--max-line-length=N] <file.yaml> [more files...]");
+    console.error(
+      "usage: yaml-line-lint [--json] [--fix] [--config=path] [--max-line-length=N] <file.yaml> [more files...]",
+    );
     return 2;
+  }
+
+  let options;
+  try {
+    options = loadConfig(configPath);
+  } catch (err) {
+    console.error((err as Error).message);
+    return 2;
+  }
+  if (maxLineLengthOverride !== undefined) {
+    options = { ...options, maxLineLength: maxLineLengthOverride };
   }
 
   const results: FileResult[] = [];

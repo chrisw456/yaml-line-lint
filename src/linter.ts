@@ -15,10 +15,12 @@ export interface Finding {
 
 export interface LintOptions {
   maxLineLength: number;
+  disabledRules: ReadonlySet<string>;
 }
 
 export const defaultOptions: LintOptions = {
   maxLineLength: 120,
+  disabledRules: new Set(),
 };
 
 interface MapFrame {
@@ -42,7 +44,7 @@ export function lint(content: string, options: LintOptions = defaultOptions): Fi
 
     if (trimmed.length === 0 || trimmed.startsWith("#")) {
       checkTrailingWhitespace(rawLine, lineNumber, lineFindings);
-      pushAllowed(lineFindings, ignore, findings);
+      pushAllowed(dropDisabledRules(lineFindings, options), ignore, findings);
       return;
     }
 
@@ -79,10 +81,17 @@ export function lint(content: string, options: LintOptions = defaultOptions): Fi
       checkFlowMappings(rawLine, lineNumber, lineFindings);
     }
 
-    pushAllowed(lineFindings, ignore, findings);
+    pushAllowed(dropDisabledRules(lineFindings, options), ignore, findings);
   });
 
   return findings;
+}
+
+function dropDisabledRules(lineFindings: Finding[], options: LintOptions): Finding[] {
+  if (options.disabledRules.size === 0) {
+    return lineFindings;
+  }
+  return lineFindings.filter((finding) => !options.disabledRules.has(finding.rule));
 }
 
 // Recognizes a trailing `# lint:ignore` or `# lint:ignore=rule-a,rule-b`

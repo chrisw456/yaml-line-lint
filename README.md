@@ -65,7 +65,27 @@ finding, and 0 otherwise, so it can gate a CI job.
 
 - `--json` — emit findings as JSON instead of plain text.
 - `--fix` — rewrite files in place, stripping trailing whitespace, before linting. Line endings are left as they were; other rules (tabs, duplicate keys, long lines) are reported but not auto-fixed.
-- `--max-line-length=N` — override the default 120-character line limit.
+- `--max-line-length=N` — override the default 120-character line limit. Takes precedence over a config file's `maxLineLength`.
+- `--config=path` — read config from `path` instead of `.yaml-line-lint.json`.
+
+## Configuration
+
+Drop a `.yaml-line-lint.json` in the directory you run the linter from to disable rules or
+change the line length limit project-wide:
+
+```json
+{
+  "maxLineLength": 100,
+  "rules": {
+    "no-tabs": false
+  }
+}
+```
+
+`rules` maps a rule name (see the table above) to `true` or `false`; only rules you want to turn
+off need an entry, since every rule defaults to enabled. This file is optional — with none
+present, the linter just uses its defaults. Use `--config=path` to point at a config file
+somewhere else, which is an error (rather than silently ignored) if it doesn't exist.
 
 ## Rules
 
